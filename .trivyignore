@@ -1,0 +1,3 @@
+# Format: one CVE ID per line, with a comment explaining the accepted risk.
+# Example:
+# CVE-2023-XXXXX  # Accepted: affects unused feature; review by 2026-09-30.

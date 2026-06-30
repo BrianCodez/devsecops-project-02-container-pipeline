@@ -1,0 +1,175 @@
+name: Container Image Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - app/**
+      - Dockerfile
+      - requirements.txt
+      - .github/workflows/container-pipeline.yml
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: demo-app
+
+jobs:
+  build:
+    name: Build and Push to Staging
+    runs-on: ubuntu-latest
+    outputs:
+      image-ref: ${{ steps.meta.outputs.registry }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.image_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Azure with staging service principal
+        run: |
+          az login --service-principal \
+            --username "${{ secrets.STAGING_CLIENT_ID }}" \
+            --password "${{ secrets.STAGING_CLIENT_SECRET }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+          az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Authenticate Docker to Staging ACR
+        run: az acr login --name "${{ secrets.STAGING_ACR_NAME }}"
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          echo "registry=${{ secrets.STAGING_ACR_NAME }}.azurecr.io" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${{ secrets.STAGING_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push to staging
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_tag }}
+            ${{ secrets.STAGING_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:staging-latest
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  scan:
+    name: Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Azure with staging service principal
+        run: |
+          az login --service-principal \
+            --username "${{ secrets.STAGING_CLIENT_ID }}" \
+            --password "${{ secrets.STAGING_CLIENT_SECRET }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+          az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Authenticate Docker to Staging ACR
+        run: az acr login --name "${{ secrets.STAGING_ACR_NAME }}"
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ needs.build.outputs.image-ref }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          trivyignores: .trivyignore
+
+      - name: Save Trivy JSON report
+        if: always()
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ needs.build.outputs.image-ref }}
+          format: json
+          output: trivy-results.json
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results-${{ github.sha }}
+          path: trivy-results.json
+          retention-days: 90
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Login to Azure with staging service principal
+        run: |
+          az login --service-principal \
+            --username "${{ secrets.STAGING_CLIENT_ID }}" \
+            --password "${{ secrets.STAGING_CLIENT_SECRET }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+          az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Authenticate Docker to Staging ACR
+        run: az acr login --name "${{ secrets.STAGING_ACR_NAME }}"
+
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ needs.build.outputs.image-ref }}
+          format: cyclonedx
+          output: sbom-cyclonedx.json
+
+      - name: Generate SPDX SBOM
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ needs.build.outputs.image-ref }}
+          format: spdx-json
+          output: sbom-spdx.json
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: |
+            sbom-cyclonedx.json
+            sbom-spdx.json
+          retention-days: 365
+
+  promote:
+    name: Promote to Production
+    runs-on: ubuntu-latest
+    needs: [build, scan, sbom]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Login to Azure with production service principal
+        run: |
+          az login --service-principal \
+            --username "${{ secrets.PROD_CLIENT_ID }}" \
+            --password "${{ secrets.PROD_CLIENT_SECRET }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+          az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Promote scanned image digest to production ACR
+        run: |
+          az acr import \
+            --name "${{ secrets.PROD_ACR_NAME }}" \
+            --source "${{ needs.build.outputs.image-ref }}" \
+            --image "${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            --image "${{ env.IMAGE_NAME }}:latest" \
+            --force
+
+      - name: Confirm production image
+        run: |
+          az acr repository show-tags \
+            --name "${{ secrets.PROD_ACR_NAME }}" \
+            --repository "${{ env.IMAGE_NAME }}" \
+            --output table
