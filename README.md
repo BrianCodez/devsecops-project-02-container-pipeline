@@ -1,22 +1,53 @@
 # Container Image Scanning and Promotion Pipeline
 
-Builds a demo Flask container, pushes it to staging Azure Container Registry, scans it with Trivy, uploads SBOMs, then promotes only clean images to production ACR.
+Builds a demo Flask container, pushes it to staging Azure Container Registry, scans it with Trivy, generates SBOM artifacts, and promotes only clean images to production ACR.
 
-## Architecture
+This project demonstrates a practical DevSecOps supply-chain gate: the image that reaches production is the exact digest that passed vulnerability scanning.
 
-![Container DevSecOps Pipeline](assets/diagrams/high-level-architecture.png)
+## What this demonstrates
 
-![CI/CD Workflow with Security Gate](assets/diagrams/ci-cd-workflow.png)
+- Terraform-provisioned Azure infrastructure
+- Separate staging and production Azure Container Registries
+- Scoped service principals instead of ACR admin users
+- GitHub Actions CI/CD with a security gate
+- Trivy vulnerability scanning
+- CycloneDX and SPDX SBOM generation
+- Digest-based image promotion with `az acr import`
+- Cost-aware teardown workflow
 
-![Azure Infrastructure](assets/diagrams/azure-infrastructure.png)
+## High-level architecture
 
-## Files
+The pipeline separates build, staging, scan, and production promotion. Failed scans stop before production.
+
+![Container DevSecOps Pipeline](assets/diagrams/high-level-architecture.drawio.png)
+
+Editable source: [`assets/diagrams/high-level-architecture.drawio`](assets/diagrams/high-level-architecture.drawio)
+
+## CI/CD workflow
+
+GitHub Actions builds the image, pushes it to staging ACR, scans the immutable image digest with Trivy, uploads security artifacts, and promotes only after scan and SBOM jobs pass.
+
+![CI/CD Workflow with Security Gate](assets/diagrams/ci-cd-workflow.drawio.png)
+
+Editable source: [`assets/diagrams/ci-cd-workflow.drawio`](assets/diagrams/ci-cd-workflow.drawio)
+
+## Azure infrastructure
+
+Terraform creates a small, low-cost Azure footprint: one resource group, two Basic ACR instances, two service principals, and scoped ACR role assignments.
+
+![Azure Infrastructure](assets/diagrams/azure-infrastructure.drawio.png)
+
+Editable source: [`assets/diagrams/azure-infrastructure.drawio`](assets/diagrams/azure-infrastructure.drawio)
+
+## Repository layout
 
 - `infra/` — Terraform for resource group, staging/prod ACRs, service principals, and role assignments.
 - `app/` — demo Flask app used by the pipeline.
 - `Dockerfile` — non-root Python image.
 - `.github/workflows/container-pipeline.yml` — build, scan, SBOM, and promote workflow.
 - `.trivyignore` — documented accepted-risk suppressions.
+- `docs/project-plan.md` — detailed project outline and implementation reference.
+- `assets/diagrams/` — editable draw.io diagrams and README PNG exports.
 
 ## Lab cost guardrails
 
@@ -36,7 +67,54 @@ monthly_budget_amount = 5
 budget_start_date     = "2026-06-01T00:00:00Z"
 ```
 
-When screenshots/evidence are done and you are ready to tear down:
+## Setup
+
+```bash
+az login
+az account set --subscription "<subscription name or id>"
+cp infra/terraform.tfvars.example infra/terraform.tfvars
+# edit infra/terraform.tfvars; yourname must be globally unique for ACR names
+cd infra
+terraform init
+terraform plan
+terraform apply
+```
+
+Add these GitHub Actions secrets from `terraform output -raw <name>`:
+
+| Secret | Terraform output |
+|---|---|
+| `STAGING_ACR_NAME` | `staging_acr_name` |
+| `PROD_ACR_NAME` | `prod_acr_name` |
+| `STAGING_CLIENT_ID` | `staging_client_id` |
+| `STAGING_CLIENT_SECRET` | `staging_client_secret` |
+| `PROD_CLIENT_ID` | `prod_client_id` |
+| `PROD_CLIENT_SECRET` | `prod_client_secret` |
+| `AZURE_TENANT_ID` | `tenant_id` |
+| `AZURE_SUBSCRIPTION_ID` | `subscription_id` |
+
+Push to `main` or run the workflow manually from GitHub Actions.
+
+## Verification
+
+The promotion step imports the scanned image by digest, then tags that exact image as both `${{ github.sha }}` and `latest` in production.
+
+Verify registry tags after a successful workflow:
+
+```bash
+./scripts/verify-registries.sh
+```
+
+Expected result:
+
+- Staging ACR contains `demo-app:<sha>` and `demo-app:staging-latest`.
+- Production ACR contains `demo-app:<sha>` and `demo-app:latest`.
+- GitHub Actions contains the Trivy JSON report artifact.
+- GitHub Actions contains CycloneDX and SPDX SBOM artifacts.
+
+## Teardown
+
+Only tear down after collecting screenshots/evidence.
 
 ```bash
 ./scripts/destroy-lab.sh
@@ -49,42 +127,3 @@ az group exists --name "rg-container-pipeline-<yourname>"
 ```
 
 That command should return `false`.
-
-## Setup
-
-```bash
-az login
-az account set --subscription "<subscription name or id>"
-cp infra/terraform.tfvars.example infra/terraform.tfvars
-# edit infra/terraform.tfvars; yourname must be globally unique for ACR names
-cd infra
-terraform init
-terraform apply
-```
-
-Add these GitHub Actions secrets from `terraform output -raw <name>`:
-
-- `STAGING_ACR_NAME`
-- `PROD_ACR_NAME`
-- `STAGING_CLIENT_ID`
-- `STAGING_CLIENT_SECRET`
-- `PROD_CLIENT_ID`
-- `PROD_CLIENT_SECRET`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
-
-Push to `main` to run the pipeline.
-
-The promotion step imports the scanned image by digest, then tags that exact image as both `${{ github.sha }}` and `latest` in production.
-
-Verify registry tags after a successful workflow:
-
-```bash
-./scripts/verify-registries.sh
-```
-
-## Teardown
-
-```bash
-./scripts/destroy-lab.sh
-```
