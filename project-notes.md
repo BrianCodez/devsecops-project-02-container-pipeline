@@ -1,5 +1,7 @@
 # Project Notes
 
+Detailed technical outline: [`docs/project-plan.md`](docs/project-plan.md).
+
 ## Implementation plan
 
 1. Create GitHub repo and push project code.
