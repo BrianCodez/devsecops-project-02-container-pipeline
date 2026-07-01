@@ -1,5 +1,18 @@
 # Project Notes
 
+## Implementation plan
+
+1. Create GitHub repo and push project code.
+2. Run Terraform plan.
+3. On explicit approval, run Terraform apply.
+4. Add Terraform outputs as GitHub Actions secrets.
+5. Run GitHub Actions pipeline.
+6. Verify staging ACR has `demo-app:${GITHUB_SHA}` and `demo-app:staging-latest`.
+7. Verify Trivy JSON, CycloneDX, and SPDX artifacts exist in GitHub Actions.
+8. Verify production ACR has the promoted digest tagged as `${GITHUB_SHA}` and `latest`.
+9. Leave Azure resources running until screenshots/evidence are collected.
+10. Destroy resources only after explicit teardown approval.
+
 ## Commands I ran
 
 ```bash
@@ -9,8 +22,8 @@ terraform validate
 
 ## Problems encountered
 
-- Azure CLI is installed, but this WSL session is not logged in yet: `az account show` asks for `az login`.
-- GitHub CLI is not installed in this WSL session; use the GitHub web UI for secrets unless you install/authenticate `gh`.
+- Azure CLI auth initially landed on an account with no subscription; fixed by logging into the subscription-bearing account.
+- GitHub CLI was initially missing; installed/authenticated `gh` and created the public GitHub repo.
 - Added `scripts/verify-registries.sh` to capture staging/production ACR tags after the workflow runs.
 - `explorer.exe` returned exit code 1 from this shell; use Windows Explorer manually if needed.
 
