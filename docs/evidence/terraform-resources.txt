@@ -1,0 +1,19 @@
+Terraform-managed resources at time of successful run:
+data.azuread_client_config.current
+data.azurerm_client_config.current
+azuread_application.prod
+azuread_application.staging
+azuread_service_principal.prod
+azuread_service_principal.staging
+azuread_service_principal_password.prod
+azuread_service_principal_password.staging
+azurerm_resource_group.main
+azurerm_role_assignment.prod_import
+azurerm_role_assignment.prod_push
+azurerm_role_assignment.prod_staging_pull
+azurerm_role_assignment.prod_staging_read
+azurerm_role_assignment.staging_pull
+azurerm_role_assignment.staging_push
+azurerm_role_definition.acr_import
+module.prod_acr.azurerm_container_registry.this
+module.staging_acr.azurerm_container_registry.this
