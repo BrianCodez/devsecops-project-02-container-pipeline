@@ -19,9 +19,11 @@ jobs:
   build:
     name: Build and Push to Staging
     runs-on: ubuntu-latest
+    # Job outputs containing secrets are dropped by GitHub, so only the
+    # digest crosses the job boundary; downstream jobs rebuild the full
+    # image ref from the registry secret + this digest.
     outputs:
-      image-ref: ${{ steps.meta.outputs.registry }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-      image-tag: ${{ steps.meta.outputs.image_tag }}
+      image-digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - uses: actions/checkout@v4
@@ -76,9 +78,9 @@ jobs:
         run: az acr login --name "${{ secrets.STAGING_ACR_NAME }}"
 
       - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ needs.build.outputs.image-ref }}
+          image-ref: ${{ secrets.STAGING_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}
           format: table
           exit-code: "1"
           ignore-unfixed: true
@@ -87,9 +89,9 @@ jobs:
 
       - name: Save Trivy JSON report
         if: always()
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ needs.build.outputs.image-ref }}
+          image-ref: ${{ secrets.STAGING_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}
           format: json
           output: trivy-results.json
           ignore-unfixed: true
@@ -121,16 +123,16 @@ jobs:
         run: az acr login --name "${{ secrets.STAGING_ACR_NAME }}"
 
       - name: Generate CycloneDX SBOM
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ needs.build.outputs.image-ref }}
+          image-ref: ${{ secrets.STAGING_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}
           format: cyclonedx
           output: sbom-cyclonedx.json
 
       - name: Generate SPDX SBOM
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ needs.build.outputs.image-ref }}
+          image-ref: ${{ secrets.STAGING_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}
           format: spdx-json
           output: sbom-spdx.json
 
@@ -162,7 +164,7 @@ jobs:
         run: |
           az acr import \
             --name "${{ secrets.PROD_ACR_NAME }}" \
-            --source "${{ needs.build.outputs.image-ref }}" \
+            --source "${{ secrets.STAGING_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}" \
             --image "${{ env.IMAGE_NAME }}:${{ github.sha }}" \
             --image "${{ env.IMAGE_NAME }}:latest" \
             --force
