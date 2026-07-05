@@ -118,3 +118,36 @@ resource "azurerm_role_assignment" "prod_staging_pull" {
   principal_id                     = azuread_service_principal.prod.object_id
   skip_service_principal_aad_check = true
 }
+
+# `az acr import` is a management-plane call; AcrPush/AcrPull are
+# data-plane only, so the prod SP also needs registry read + the
+# importImage action.
+resource "azurerm_role_definition" "acr_import" {
+  name  = "acr-import-${var.yourname}"
+  scope = azurerm_resource_group.main.id
+
+  permissions {
+    actions = [
+      "Microsoft.ContainerRegistry/registries/read",
+      "Microsoft.ContainerRegistry/registries/importImage/action",
+    ]
+  }
+
+  assignable_scopes = [azurerm_resource_group.main.id]
+}
+
+resource "azurerm_role_assignment" "prod_import" {
+  scope                            = module.prod_acr.id
+  role_definition_id               = azurerm_role_definition.acr_import.role_definition_resource_id
+  principal_id                     = azuread_service_principal.prod.object_id
+  skip_service_principal_aad_check = true
+}
+
+# Reader on the staging ACR lets the import call resolve and pull the
+# source image with the caller's identity (paired with AcrPull above).
+resource "azurerm_role_assignment" "prod_staging_read" {
+  scope                            = module.staging_acr.id
+  role_definition_name             = "Reader"
+  principal_id                     = azuread_service_principal.prod.object_id
+  skip_service_principal_aad_check = true
+}
