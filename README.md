@@ -4,6 +4,12 @@ Builds a demo Flask container, pushes it to staging Azure Container Registry, sc
 
 This project demonstrates a practical DevSecOps supply-chain gate: the image that reaches production is the exact digest that passed vulnerability scanning.
 
+## Video walkthrough
+
+[![Making Container Image Scans Production Mandatory](https://cdn.loom.com/sessions/thumbnails/dbb300d63e9b4a94bfe4eb1c36625405-99225abac2ad9279.gif)](https://www.loom.com/share/dbb300d63e9b4a94bfe4eb1c36625405)
+
+Watch the project walkthrough on Loom: [Making Container Image Scans Production Mandatory](https://www.loom.com/share/dbb300d63e9b4a94bfe4eb1c36625405).
+
 ## What this demonstrates
 
 - Terraform-provisioned Azure infrastructure
